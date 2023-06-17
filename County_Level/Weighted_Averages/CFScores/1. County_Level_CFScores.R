@@ -323,38 +323,3 @@ full_df <- bind_rows(full_list)
 
 # Write it as csv. Done.
 fwrite(full_df, '{output}/county_avgcfscore_combined.csv')
-
-# library(haven)
-# dfnew <- read_dta('./Data/Output/contribs_cf_combined.dta')
-# dfold <- read_dta('C:/Users/anjun/Downloads/contribs_cf_week_level.dta')
-# 
-# sum(floor(dfnew$tpd_cands))
-# sum(floor(dfold$tpd_cands))
-# 
-# sum(dfnew$donation_count_cands)
-# sum(dfold$donation_count_cands)
-# 
-# sum(dfnew$tpd_cands_cf)
-# sum(dfold$tpd_cands_cf)
-# 
-# sum(dfnew$donation_count_cands_cf)
-# sum(dfold$donation_count_cands_cf)
-# 
-# sum(dfnew$tpd_cands_cfpos, na.rm = TRUE)
-# sum(dfold$tpd_cands_cfpos, na.rm = TRUE)
-# 
-# sum(dfnew$tpd_cands_cfneg, na.rm = TRUE)
-# sum(dfold$tpd_cands_cfneg, na.rm = TRUE)
-# 
-# sum(dfnew$donation_count_cands_cfpos, na.rm = TRUE)
-# sum(dfold$donation_count_cands_cfpos)
-# 
-# which(dfnew$tpd_cands_cfpos != dfold$tpd_cands_cfpos)
-# 
-# 
-# dfnews <- filter(dfold, fips == 11001)
-# 
-# which(dfnew$tpd_cands - dfold$tpd_cands > 1.7)
-# 
-# dfnews <- dfnew[633025,]
-# dfolds <- dfold[633025,]
