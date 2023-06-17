@@ -7,10 +7,11 @@
 ******
 
 clear all
-global path "C:\Users\anjun\OneDrive\Desktop\EP\DIME"
-global path2 "C:\Users\anjun\OneDrive\Desktop\EP\LCV"
+global path "C:\Users\anjun\OneDrive\Desktop\EP\DIME\DIME_Data\Output\County_Level\Weighted_Averages\CFScores"
+global path2 "C:\Users\anjun\OneDrive\Desktop\EP\DIME\DIME_Data\Raw"
+global path3 "C:\Users\anjun\OneDrive\Desktop\EP\DIME\DIME_Data\Cleaned"
 
-import delimited "$path\Data\Cleaned\test_contribs_cf_combined.csv", varnames(1) clear
+import delimited "$path\test_contribs_cf_combined.csv", varnames(1) clear
 
 gen date2 = date(date, "YMD")
 format date2 %td
@@ -25,7 +26,7 @@ order week, after(date)
 
 sort week fips
 
-export delimited "$path\Data\Cleaned\test_contribs_cf_combined.csv", replace
+export delimited "$path\test_contribs_cf_combined.csv", replace
 
 
 
@@ -42,17 +43,18 @@ export delimited "$path\Data\Cleaned\test_contribs_cf_combined.csv", replace
 
 
 clear all
-global path "C:\Users\anjun\OneDrive\Desktop\EP\DIME"
-global path2 "C:\Users\anjun\OneDrive\Desktop\EP\LCV"
+global path "C:\Users\anjun\OneDrive\Desktop\EP\DIME\DIME_Data\Output\County_Level\Weighted_Averages\CFScores"
+global path2 "C:\Users\anjun\OneDrive\Desktop\EP\DIME\DIME_Data\Raw"
+global path3 "C:\Users\anjun\OneDrive\Desktop\EP\DIME\DIME_Data\Cleaned"
 
-import delimited "$path\Data\Cleaned\test_contribs_cf_combined.csv", varnames(1) clear
+import delimited "$path\test_contribs_cf_combined.csv", varnames(1) clear
 
 format week %tw
 
-save "$path\Data\Output\test_contribs_cf_combined"
+save "$path\test_contribs_cf_combined"
 
 * Now FEMA data to create the regressors.
-use "$path2/Data/Raw/FEMA_disaster_county_clean", replace
+use "$path2\FEMA_disaster_county_clean", replace
 
 * Remain in the relevant time frame
 keep if start_datetime > date("01/01/2000", "MDY") & start_datetime < date("01/01/2015", "MDY")
@@ -121,11 +123,11 @@ drop dup3
 
 keep week fips 
 gen remove = 1
-save "$path/Data/Cleaned/remove_these", replace
+save "$path3\remove_these", replace
 
 *************************************
 
-use "$path2/Data/Raw/FEMA_disaster_county_clean", replace
+use "$path2\FEMA_disaster_county_clean", replace
 
 * Remain in the relevant time frame
 keep if start_datetime > date("01/01/2000", "MDY") & start_datetime < date("01/01/2015", "MDY")
@@ -142,7 +144,7 @@ duplicates drop fips week, force					// keep only one event per county in a week
 gen EWE = 1											
 * dummy to signal one extreme weather event in a county in a week
 
-merge 1:1 week fips using "$path/Data/Cleaned/remove_these"
+merge 1:1 week fips using "$path3\remove_these"
 keep if _merge == 1
 
 expand 9, gen(new)
@@ -175,14 +177,14 @@ drop remove n new _merge
 
 * Final Merge.
 sort week fips
-merge 1:1 week fips using "$path\Data\Output\test_contribs_cf_combined"
+merge 1:1 week fips using "$path\test_contribs_cf_combined"
 
 *tsset fips week
 *tsfill, full
 
 keep if _merge != 2
 
-save "$path\Data\Output\test_contribs_cf_combined_matched", replace
+save "$path\test_contribs_cf_combined_matched", replace
 
 
 

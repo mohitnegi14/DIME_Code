@@ -6,11 +6,12 @@
 # This script tries out for a random FIPS = 54033
 
 ################## PATHS
-harddrive <- 'D:/Mohit_Work/LCV/ContribDB'
-localfiles <- 'C:/Users/anjun/OneDrive/Desktop/EP/ContribDB'
-rawfiles <- 'C:/Users/anjun/OneDrive/Desktop/EP/LCV/Data/Raw'
-cleanfiles <- 'C:/Users/anjun/OneDrive/Desktop/EP/LCV/Data/Cleaned'
-################## PATHS
+harddrive <- 'D:/Mohit_Work/DIME/ContribDB'
+localfiles <- 'C:/Users/anjun/OneDrive/Desktop/EP/DIME/ContribDB'
+raw <- 'C:/Users/anjun/OneDrive/Desktop/EP/DIME/DIME_Data/Raw'
+cleaned <- 'C:/Users/anjun/OneDrive/Desktop/EP/DIME/DIME_Data/Cleaned'
+output <- 'C:/Users/anjun/OneDrive/Desktop/EP/DIME/DIME_Data/Output/County_Level/Weighted_Averages/CFScores'
+##################
 
 ################## LIBRARIES
 library(tidyverse)
@@ -30,19 +31,20 @@ relevant_columns <- c('cycle', 'bonica.cid', 'date', 'amount', 'contributor.zipc
 # Note down the cycles we want
 cycles <- c(2002, 2004, 2006, 2008, 2010, 2012, 2014)
 
-for(i in 1:length(cycles)) {
+for(i in 1:5) {
   
   print(glue('We are on {cycles[i]}'))
   
   if(i < 6) {
-  # Now load it in.
-  contribs <- fread(glue('{localfiles}/contribDB_{cycles[i]}.csv'), select = relevant_columns)
-  
+    # Now load it in.
+    contribs <- fread(glue('{localfiles}/contribDB_{cycles[i]}.csv'), select = relevant_columns)
+    
   } else contribs <- fread(glue('{harddrive}/contribDB_{cycles[i]}.csv'), select = relevant_columns)
+  
   # Now we want to get the recipients ICPSR id from what we have - bonica.rid. 
   # This is needed since LCV data has ICPSR ids. 
   # The following dataset has the matchings.
-  recipients <- fread(glue('{rawfiles}/dime_recipients_all_1979_2014.csv'), select = c('ICPSR2', 'bonica.rid', 'seat', 'recipient.type')) %>% 
+  recipients <- fread(glue('{raw}/dime_recipients_all_1979_2014.csv'), select = c('ICPSR2', 'bonica.rid', 'seat', 'recipient.type')) %>% 
     filter(seat %in% c('federal:senate', 'federal:house', 'federal:committee')) %>% 
     select(-seat) %>% 
     unique()
@@ -55,8 +57,6 @@ for(i in 1:length(cycles)) {
                                allow.cartesian = TRUE)
   contribs <- contribs[!is.na(ICPSR2),]
   
-  con <- contribs
-  
   # For now, we only want incumbents. So filter them out. Key idea : non-incumbents have alpha-numeric ICPSR.
   # But this applies only to candidates, not committees.
   contribs <- contribs[!(recipient.type == 'cand' & str_detect(ICPSR2, pattern = '[:alpha:]')),]
@@ -65,9 +65,9 @@ for(i in 1:length(cycles)) {
   contribs <- contribs[, contributor.zipcode := str_sub(str_trim(contributor.zipcode, side = 'both'),1, 5)]
   
   # Load in the zip to county matching dataset.
-  zip_county_match <- fread(glue('{rawfiles}/Zip-Codes-to-City-County-State-2020.csv'), select = c('zip', 'county', 'state'))
+  zip_county_match <- fread(glue('{raw}/Zip-Codes-to-City-County-State-2020.csv'), select = c('zip', 'county', 'state'))
   zip_county_match <- zip_county_match[, zip := str_sub(str_trim(zip, side = 'both'), 1, 5)]
-
+  
   # Do the matching according to the zip code.
   contribs <- merge.data.table(contribs, zip_county_match,
                                by.x = 'contributor.zipcode',
@@ -92,7 +92,7 @@ for(i in 1:length(cycles)) {
                          str_replace_all(pattern = ('St '), replacement = 'St. ')]
   
   # Load in a dataset that has the corresponding FIPs to names.
-  name_to_fips_dset <- fread(glue('{rawfiles}/County_zip_dma_converter_fips.csv'))
+  name_to_fips_dset <- fread(glue('{raw}/County_zip_dma_converter_fips.csv'))
   name_to_fips_dset <- name_to_fips_dset %>% 
     rename('CountyFIPS' = 'fips') %>% 
     rename('StateAbbr' = 'state') %>% 
@@ -135,9 +135,9 @@ for(i in 1:length(cycles)) {
                                by.y = c('state', 'county'),
                                all.x = FALSE)
   
-  # For Test, just one FIPS = 54033
-  contribs <- contribs[FIPS == 54033,]
-
+  # Keep only 2 randomly chosen counties : 18183, 37187.
+  contribs <- contribs[FIPS %in% c(18183, 37187),]
+  
   # Simple count tracker.
   contribs <- contribs[, count := 1] 
   
@@ -150,15 +150,6 @@ for(i in 1:length(cycles)) {
                               cfscore_neg = contributor.cfscore < 0,
                               year = year(date))]
   
-  # Don't need this part in Test.
-  # # First, collapse yearly cfscore averages.
-  # contribs1 <- contribs[, .(sum_cfscore = sum(contributor.cfscore, na.rm = TRUE),
-  #                           num_dons = sum(cfscore_avail)),
-  #                       by = .(FIPS, year)]
-  # 
-  # # Saving the average CF Scores of donors in a FIPS in a given year.
-  # fwrite(contribs1, glue('./Data/Cleaned/county_avgcfscore_{cycles[i]}.csv'))
-  
   # Now collapse individual data to get data only on the county-week-recipient level.
   contribs <- contribs[, .(TPD = sum(amount),
                            Donation_Count = sum(count),
@@ -169,34 +160,34 @@ for(i in 1:length(cycles)) {
                            TPD_cfneg = sum(amount * cfscore_neg),
                            Donation_Count_cfneg = sum(count * cfscore_neg)),
                        by = .(FIPS, ICPSR2, date, recipient.type)]
-
+  
   # Load in green PAC data.
   # ICPSR column must be named 'ICPSR'.
-  green_PACs <- fread(glue('{cleanfiles}/greenPACs_icpsr.csv'))
+  green_PACs <- fread(glue('{cleaned}/greenPACs_icpsr.csv'))
   green_PACs <- unlist(green_PACs, use.names=FALSE)
   green_PACs <- green_PACs[which(green_PACs != '')] %>% unique()
   green_PACs <- data.table('ICPSR' = green_PACs)
-
+  
   # Create indicators for whether the recipient was a candidate or a PAC.
   contribs <- contribs[, `:=`(indicator_cand = (recipient.type == 'cand'),
                               indicator_PAC = (recipient.type == 'comm'))]
   
   # Create indicator if the recipient is a green PAC.
   contribs <- contribs[, indicator_greenPAC := ((contribs$ICPSR2 %in% unique(green_PACs$ICPSR)) * indicator_PAC)]
-
+  
   # Now load in LCV scorecard data.
-  LCV_scores <- fread(glue('{cleanfiles}/harmonized_scorecards.csv'))
+  LCV_scores <- fread(glue('{cleaned}/harmonized_scorecards.csv'))
   LCV_scores$ICPSR <- as.character(LCV_scores$ICPSR)
-
+  
   # Ed Markey - middle of 2013 rep to sen anomaly, appears twice. Remove his senate record. (14435)
   # Steven Kirk - Nov 2010 transition (20115)
   # Dean Heller - May 2011, keep senate now. (20730)
   LCV_scores <- LCV_scores[!(ICPSR == 14435 & Year == 2013 & Chamber == 2),]
   LCV_scores <- LCV_scores[!(ICPSR == 20115 & Year == 2010 & Chamber == 2),]
   LCV_scores <- LCV_scores[!(ICPSR == 20730 & Year == 2011 & Chamber == 1),]
-
+  
   LCV_indicator_dset <- LCV_scores[,.(ICPSR, Year, Nominal.Score, Adj.Score, indicator_has_LCV_data = 1)]
-
+  
   # # We want the scores from the year before.
   contribs <- contribs[, prev_year := (year(date) - 1)]
   
@@ -205,7 +196,7 @@ for(i in 1:length(cycles)) {
                                by.x = c('ICPSR2', 'prev_year'),
                                by.y = c('ICPSR', 'Year'),
                                all.x = TRUE)
-
+  
   #### Make the final columns for analysis. We will only consider donations to LCV data candidates now.
   contribs <- contribs[, `:=`(TPD_cands = (TPD * indicator_cand * indicator_has_LCV_data),
                               Donation_count_cands = (Donation_Count * indicator_cand * indicator_has_LCV_data),
@@ -215,20 +206,20 @@ for(i in 1:length(cycles)) {
                               Donation_count_cands_cfpos = (Donation_Count_cfpos * indicator_cand * indicator_has_LCV_data),
                               TPD_cands_cfneg = (TPD_cfneg * indicator_cand * indicator_has_LCV_data),
                               Donation_count_cands_cfneg = (Donation_Count_cfneg * indicator_cand * indicator_has_LCV_data))]
-
+  
   contribs <- contribs[, `:=`(wsum_amounts_adj = (TPD_cands * Adj.Score),
-                           wsum_amounts_nominal = (TPD_cands * Nominal.Score),
-                           wsum_counts_adj = (Donation_count_cands * Adj.Score),
-                           wsum_counts_nominal = (Donation_count_cands * Nominal.Score),
-                           wsum_amounts_adj_cfpos = (TPD_cands_cfpos * Adj.Score),
-                           wsum_amounts_nominal_cfpos = (TPD_cands_cfpos * Nominal.Score),
-                           wsum_counts_adj_cfpos = (Donation_count_cands_cfpos * Adj.Score),
-                           wsum_counts_nominal_cfpos = (Donation_count_cands_cfpos * Nominal.Score),
-                           wsum_amounts_adj_cfneg = (TPD_cands_cfneg * Adj.Score),
-                           wsum_amounts_nominal_cfneg = (TPD_cands_cfneg * Nominal.Score),
-                           wsum_counts_adj_cfneg = (Donation_count_cands_cfneg * Adj.Score),
-                           wsum_counts_nominal_cfneg = (Donation_count_cands_cfneg * Nominal.Score))]
-
+                              wsum_amounts_nominal = (TPD_cands * Nominal.Score),
+                              wsum_counts_adj = (Donation_count_cands * Adj.Score),
+                              wsum_counts_nominal = (Donation_count_cands * Nominal.Score),
+                              wsum_amounts_adj_cfpos = (TPD_cands_cfpos * Adj.Score),
+                              wsum_amounts_nominal_cfpos = (TPD_cands_cfpos * Nominal.Score),
+                              wsum_counts_adj_cfpos = (Donation_count_cands_cfpos * Adj.Score),
+                              wsum_counts_nominal_cfpos = (Donation_count_cands_cfpos * Nominal.Score),
+                              wsum_amounts_adj_cfneg = (TPD_cands_cfneg * Adj.Score),
+                              wsum_amounts_nominal_cfneg = (TPD_cands_cfneg * Nominal.Score),
+                              wsum_counts_adj_cfneg = (Donation_count_cands_cfneg * Adj.Score),
+                              wsum_counts_nominal_cfneg = (Donation_count_cands_cfneg * Nominal.Score))]
+  
   # Remove unimportant columns now.
   contribs <- contribs[, c('prev_year',
                            'recipient.type',
@@ -246,26 +237,26 @@ for(i in 1:length(cycles)) {
                            'Nominal.Score',
                            'Adj.Score',
                            'indicator_has_LCV_data') := NULL]
-
+  
   # Since we are, for now, only considering donations to candidates, many NAs (when the donation was to a PAC),
   # So remove them.
   contribs <- contribs[!is.na(TPD_cands),]
-
-  fwrite(contribs, glue('./Data/Cleaned/test_contribs_cf_{cycles[i]}.csv'))
+  
+  fwrite(contribs, glue('{cleaned}/test_contribs_cf_{cycles[i]}.csv'))
+  
+  rm(contribs)
   
 }
 
-rm(list = ls())
-
 #### NEXT STEP : COMBINE THESE DATA INTO ONE.
-list_of_datasets_by_year <- list.files(path = './Data/Cleaned/', pattern = 'test_contribs_cf_20*')
+list_of_datasets_by_year <- list.files(path = glue('{cleaned}/'), pattern = 'test_contribs_cf_20*')
 
 list_of_datasets_by_year
 
 full_list <- list()
 for(i in 1:length(list_of_datasets_by_year)) {
 
-  contribs <- fread(glue('./Data/Cleaned/{list_of_datasets_by_year[i]}'))
+  contribs <- fread(glue('{cleaned}/{list_of_datasets_by_year[i]}'))
   full_list[[i]] <- contribs
 
 }
@@ -273,12 +264,16 @@ for(i in 1:length(list_of_datasets_by_year)) {
 full_df <- bind_rows(full_list)
 
 # Write it as csv. Done.
-fwrite(full_df, './Data/Cleaned/test_contribs_cf_combined.csv')
+fwrite(full_df, glue('{output}/test_contribs_cf_combined.csv'))
 
+#########
+#########
+#########
+#########
 #########
 # NEXT STEP, GO TO STATA, CONVERT DATES TO WEEKS, COME BACK HERE AND COLLAPSE TO COUNTY-WEEK LEVEL.
 
-full_df <- fread('./Data/Cleaned/test_contribs_cf_combined.csv')
+full_df <- fread(glue('{output}/test_contribs_cf_combined.csv'))
 
 # Now collapse to county-week level, our final unit.
 full_df <- full_df[, .(tpd_cands = sum(tpd_cands),
@@ -303,13 +298,20 @@ full_df <- full_df[, .(tpd_cands = sum(tpd_cands),
                        wsum_counts_nominal_cfneg = sum(wsum_counts_nominal_cfneg)),
                    by = .(fips, week)]
 
-# # Check
-# fw <- full_df[, .(fips, week)]
-# fw2 <- unique(fw)
-# # Yes.
+# Check
+fw <- full_df[, .(fips, week)]
+fw2 <- unique(fw)
+# Yes.
 
-fwrite(full_df, './Data/Cleaned/test_contribs_cf_combined.csv')
+fwrite(full_df, glue('{output}/test_contribs_cf_combined.csv'))
 
+# NOW TAKE THIS BACK TO STATA.
+
+#########
+#########
+#########
+#########
+#########
 # To Test,
 # FIPS 54033, 2008W21 : MAY19-25, 690TPDCANDS, 9COUNTS, 2BYPOS, 7BYNEG.
 
@@ -317,13 +319,16 @@ for(i in 1:5) {
   
   print(glue('We are on {cycles[i]}'))
   
-  # Now load it in.
-  contribs <- fread(glue('{localfiles}/contribDB_{cycles[i]}.csv'), select = relevant_columns)
+  if(i < 6) {
+    # Now load it in.
+    contribs <- fread(glue('{localfiles}/contribDB_{cycles[i]}.csv'), select = relevant_columns)
+    
+  } else contribs <- fread(glue('{harddrive}/contribDB_{cycles[i]}.csv'), select = relevant_columns)
 
   # Now we want to get the recipients ICPSR id from what we have - bonica.rid. 
   # This is needed since LCV data has ICPSR ids. 
   # The following dataset has the matchings.
-  recipients <- fread(glue('{rawfiles}/dime_recipients_all_1979_2014.csv'), select = c('ICPSR2', 'bonica.rid', 'seat', 'recipient.type')) %>% 
+  recipients <- fread(glue('{raw}/dime_recipients_all_1979_2014.csv'), select = c('ICPSR2', 'bonica.rid', 'seat', 'recipient.type')) %>% 
     filter(seat %in% c('federal:senate', 'federal:house', 'federal:committee')) %>% 
     select(-seat) %>% 
     unique()
@@ -336,8 +341,6 @@ for(i in 1:5) {
                                allow.cartesian = TRUE)
   contribs <- contribs[!is.na(ICPSR2),]
   
-  con <- contribs
-  
   # For now, we only want incumbents. So filter them out. Key idea : non-incumbents have alpha-numeric ICPSR.
   # But this applies only to candidates, not committees.
   contribs <- contribs[!(recipient.type == 'cand' & str_detect(ICPSR2, pattern = '[:alpha:]')),]
@@ -346,7 +349,7 @@ for(i in 1:5) {
   contribs <- contribs[, contributor.zipcode := str_sub(str_trim(contributor.zipcode, side = 'both'),1, 5)]
   
   # Load in the zip to county matching dataset.
-  zip_county_match <- fread(glue('{rawfiles}/Zip-Codes-to-City-County-State-2020.csv'), select = c('zip', 'county', 'state'))
+  zip_county_match <- fread(glue('{raw}/Zip-Codes-to-City-County-State-2020.csv'), select = c('zip', 'county', 'state'))
   zip_county_match <- zip_county_match[, zip := str_sub(str_trim(zip, side = 'both'), 1, 5)]
   
   # Do the matching according to the zip code.
@@ -373,7 +376,7 @@ for(i in 1:5) {
                          str_replace_all(pattern = ('St '), replacement = 'St. ')]
   
   # Load in a dataset that has the corresponding FIPs to names.
-  name_to_fips_dset <- fread(glue('{rawfiles}/County_zip_dma_converter_fips.csv'))
+  name_to_fips_dset <- fread(glue('{raw}/County_zip_dma_converter_fips.csv'))
   name_to_fips_dset <- name_to_fips_dset %>% 
     rename('CountyFIPS' = 'fips') %>% 
     rename('StateAbbr' = 'state') %>% 
@@ -416,28 +419,27 @@ for(i in 1:5) {
                                by.y = c('state', 'county'),
                                all.x = FALSE)
   
-  # For Test, just one FIPS = 54033
-  contribs <- contribs[FIPS == 54033,]
+  # Keep only 2 randomly chosen counties : 18183, 37187.
+  contribs <- contribs[FIPS %in% c(18183, 37187),]
   
   # Simple count tracker.
   contribs <- contribs[, count := 1] 
   
   # For now, dropping negative donations.
   contribs <- contribs[amount >= 0,]
-  # contribs$count[which(contribs$amount < 0)] <- -1
   
-  fwrite(contribs, glue('./Data/Cleaned/test_check_contribs_cf_{cycles[i]}.csv'))
+  fwrite(contribs, glue('{cleaned}/test_check_contribs_cf_{cycles[i]}.csv'))
   
 }
 
-list_of_datasets_by_year <- list.files(path = './Data/Cleaned/', pattern = 'test_check_contribs_cf_20*')
+list_of_datasets_by_year <- list.files(path = glue('{cleaned}/'), pattern = 'test_check_contribs_cf_20*')
 
 list_of_datasets_by_year
 
 full_list <- list()
 for(i in 1:length(list_of_datasets_by_year)) {
   
-  contribs <- fread(glue('./Data/Cleaned/{list_of_datasets_by_year[i]}'))
+  contribs <- fread(glue('{cleaned}/{list_of_datasets_by_year[i]}'))
   full_list[[i]] <- contribs
   
 }
@@ -445,9 +447,10 @@ for(i in 1:length(list_of_datasets_by_year)) {
 full_df <- bind_rows(full_list)
 
 # REMEMBER, To Test,
-# FIPS 54033, 2008W21 : MAY19-25, 690TPDCANDS, 9COUNTS, 2BYPOS, 7BYNEG.
+# FIPS : 18183 & 37187, 2008W10 : MARCH3-9 APPROX, TPDCANDS : 100 & 187.54, COUNTS : 1 & 2, BYPOS : 0 & 0, BYNEG : 1 & 2.
 
-test <- full_df[date > date('2008/05/01') & date < date('2008/06/01') & recipient.type == 'cand']
+test <- full_df[date > date('2008/03/01') & date < date('2008/04/01') & recipient.type == 'cand']
 test <- test[, week1 := week(date)]
 
-# 99911 is not in LCV Data, which we only consider in the main dset! So, data works fine.
+# Works out. Note that here it aligned perfectly since receivers had LCV scores.
+# test doesn't include donations to non-LCV receivers and test_check does, so account for that.

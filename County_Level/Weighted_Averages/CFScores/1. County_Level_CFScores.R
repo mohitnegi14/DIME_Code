@@ -3,14 +3,16 @@
 # Last Updated : 16 June 2023
 # Contact on : mohit.negi@studbocconi.it
 ################## 
-# This script tries out for a random FIPS = 54033
+# This script cleans data for an analysis on weighted average of LCV scores, weights being
+# donation counts or amounts, separable by CFscores positive or negative of donors.
 
 ################## PATHS
-harddrive <- 'D:/Mohit_Work/LCV/ContribDB'
-localfiles <- 'C:/Users/anjun/OneDrive/Desktop/EP/ContribDB'
-rawfiles <- 'C:/Users/anjun/OneDrive/Desktop/EP/LCV/Data/Raw'
-cleanfiles <- 'C:/Users/anjun/OneDrive/Desktop/EP/LCV/Data/Cleaned'
-################## PATHS
+harddrive <- 'D:/Mohit_Work/DIME/ContribDB'
+localfiles <- 'C:/Users/anjun/OneDrive/Desktop/EP/DIME/ContribDB'
+raw <- 'C:/Users/anjun/OneDrive/Desktop/EP/DIME/DIME_Data/Raw'
+cleaned <- 'C:/Users/anjun/OneDrive/Desktop/EP/DIME/DIME_Data/Cleaned'
+output <- 'C:/Users/anjun/OneDrive/Desktop/EP/DIME/DIME_Data/Output/County_Level/Weighted_Averages/CFScores'
+################## 
 
 ################## LIBRARIES
 library(tidyverse)
@@ -39,10 +41,11 @@ for(i in 1:length(cycles)) {
     contribs <- fread(glue('{localfiles}/contribDB_{cycles[i]}.csv'), select = relevant_columns)
     
   } else contribs <- fread(glue('{harddrive}/contribDB_{cycles[i]}.csv'), select = relevant_columns)
+  
   # Now we want to get the recipients ICPSR id from what we have - bonica.rid. 
   # This is needed since LCV data has ICPSR ids. 
   # The following dataset has the matchings.
-  recipients <- fread(glue('{rawfiles}/dime_recipients_all_1979_2014.csv'), select = c('ICPSR2', 'bonica.rid', 'seat', 'recipient.type')) %>% 
+  recipients <- fread(glue('{raw}/dime_recipients_all_1979_2014.csv'), select = c('ICPSR2', 'bonica.rid', 'seat', 'recipient.type')) %>% 
     filter(seat %in% c('federal:senate', 'federal:house', 'federal:committee')) %>% 
     select(-seat) %>% 
     unique()
@@ -63,7 +66,7 @@ for(i in 1:length(cycles)) {
   contribs <- contribs[, contributor.zipcode := str_sub(str_trim(contributor.zipcode, side = 'both'),1, 5)]
   
   # Load in the zip to county matching dataset.
-  zip_county_match <- fread(glue('{rawfiles}/Zip-Codes-to-City-County-State-2020.csv'), select = c('zip', 'county', 'state'))
+  zip_county_match <- fread(glue('{raw}/Zip-Codes-to-City-County-State-2020.csv'), select = c('zip', 'county', 'state'))
   zip_county_match <- zip_county_match[, zip := str_sub(str_trim(zip, side = 'both'), 1, 5)]
   
   # Do the matching according to the zip code.
@@ -90,7 +93,7 @@ for(i in 1:length(cycles)) {
                          str_replace_all(pattern = ('St '), replacement = 'St. ')]
   
   # Load in a dataset that has the corresponding FIPs to names.
-  name_to_fips_dset <- fread(glue('{rawfiles}/County_zip_dma_converter_fips.csv'))
+  name_to_fips_dset <- fread(glue('{raw}/County_zip_dma_converter_fips.csv'))
   name_to_fips_dset <- name_to_fips_dset %>% 
     rename('CountyFIPS' = 'fips') %>% 
     rename('StateAbbr' = 'state') %>% 
@@ -151,7 +154,7 @@ for(i in 1:length(cycles)) {
                         by = .(FIPS, year)]
 
   # Saving the average CF Scores of donors in a FIPS in a given year.
-  fwrite(contribs1, glue('./Data/Cleaned/county_avgcfscore_{cycles[i]}.csv'))
+  fwrite(contribs1, glue('{cleaned}/county_avgcfscore_{cycles[i]}.csv'))
   
   # Now collapse individual data to get data only on the county-week-recipient level.
   contribs <- contribs[, .(TPD = sum(amount),
@@ -166,7 +169,7 @@ for(i in 1:length(cycles)) {
   
   # Load in green PAC data.
   # ICPSR column must be named 'ICPSR'.
-  green_PACs <- fread(glue('{cleanfiles}/greenPACs_icpsr.csv'))
+  green_PACs <- fread(glue('{cleaned}/greenPACs_icpsr.csv'))
   green_PACs <- unlist(green_PACs, use.names=FALSE)
   green_PACs <- green_PACs[which(green_PACs != '')] %>% unique()
   green_PACs <- data.table('ICPSR' = green_PACs)
@@ -179,7 +182,7 @@ for(i in 1:length(cycles)) {
   contribs <- contribs[, indicator_greenPAC := ((contribs$ICPSR2 %in% unique(green_PACs$ICPSR)) * indicator_PAC)]
   
   # Now load in LCV scorecard data.
-  LCV_scores <- fread(glue('{cleanfiles}/harmonized_scorecards.csv'))
+  LCV_scores <- fread(glue('{cleaned}/harmonized_scorecards.csv'))
   LCV_scores$ICPSR <- as.character(LCV_scores$ICPSR)
   
   # Ed Markey - middle of 2013 rep to sen anomaly, appears twice. Remove his senate record. (14435)
@@ -245,16 +248,14 @@ for(i in 1:length(cycles)) {
   # So remove them.
   contribs <- contribs[!is.na(TPD_cands),]
   
-  fwrite(contribs, glue('./Data/Cleaned/contribs_cf_{cycles[i]}.csv'))
+  fwrite(contribs, glue('{cleaned}/contribs_cf_{cycles[i]}.csv'))
   
   rm(contribs)
   
 }
 
-rm(list = ls())
-
 #### NEXT STEP : COMBINE THESE DATA INTO ONE.
-list_of_datasets_by_year <- list.files(path = './Data/Cleaned/', pattern = 'contribs_cf_20*')
+list_of_datasets_by_year <- list.files(path = glue('{cleaned}/'), pattern = 'contribs_cf_20*')
 
 list_of_datasets_by_year
 
@@ -265,7 +266,7 @@ list_of_datasets_by_year
 full_list <- list()
 for(i in 1:length(list_of_datasets_by_year)) {
   
-  contribs <- fread(glue('./Data/Cleaned/{list_of_datasets_by_year[i]}'))
+  contribs <- fread(glue('{cleaned}/{list_of_datasets_by_year[i]}'))
   full_list[[i]] <- contribs
   
 }
@@ -273,12 +274,12 @@ for(i in 1:length(list_of_datasets_by_year)) {
 full_df <- bind_rows(full_list)
 
 # Write it as csv. Done.
-fwrite(full_df, './Data/Cleaned/contribs_cf_combined.csv')
+fwrite(full_df, '{output}/contribs_cf_combined.csv')
 
 #########
 # NEXT STEP, GO TO STATA, CONVERT DATES TO WEEKS, COME BACK HERE AND COLLAPSE TO COUNTY-WEEK LEVEL.
 
-full_df <- fread('./Data/Cleaned/contribs_cf_combined.csv')
+full_df <- fread('{output}/contribs_cf_combined.csv')
 
 # Now collapse to county-week level, our final unit.
 full_df <- full_df[, .(tpd_cands = sum(tpd_cands, na.rm = TRUE),
@@ -303,17 +304,17 @@ full_df <- full_df[, .(tpd_cands = sum(tpd_cands, na.rm = TRUE),
                        wsum_counts_nominal_cfneg = sum(wsum_counts_nominal_cfneg, na.rm = TRUE)),
                    by = .(fips, week)]
 
-fwrite(full_df, './Data/Cleaned/contribs_cf_combined.csv')
+fwrite(full_df, '{output}/contribs_cf_combined.csv')
 
 # #### NEXT STEP : AVG CFSCORES DATA.
-list_of_datasets_by_year <- list.files(path = './Data/Cleaned/', pattern = 'county_avgcfscore_20*')
+list_of_datasets_by_year <- list.files(path = '{cleaned}/', pattern = 'county_avgcfscore_20*')
 
 list_of_datasets_by_year
 
 full_list <- list()
 for(i in 1:length(list_of_datasets_by_year)) {
 
-  contribs <- fread(glue('./Data/Cleaned/{list_of_datasets_by_year[i]}'))
+  contribs <- fread(glue('{cleaned}/{list_of_datasets_by_year[i]}'))
   full_list[[i]] <- contribs
 
 }
@@ -321,8 +322,7 @@ for(i in 1:length(list_of_datasets_by_year)) {
 full_df <- bind_rows(full_list)
 
 # Write it as csv. Done.
-fwrite(full_df, './Data/Cleaned/county_avgcfscore_combined.csv')
-
+fwrite(full_df, '{output}/county_avgcfscore_combined.csv')
 
 # library(haven)
 # dfnew <- read_dta('./Data/Output/contribs_cf_combined.dta')
