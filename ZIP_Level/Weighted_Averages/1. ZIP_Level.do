@@ -7,11 +7,11 @@
 ******
 
 clear all
-global path "C:\Users\anjun\OneDrive\Desktop\EP\DIME\DIME_Data\Output\County_Level\Weighted_Averages\CFScores"
+global path "C:\Users\anjun\OneDrive\Desktop\EP\DIME\DIME_Data\Output\ZIP_Level\Weighted_Averages"
 global path2 "C:\Users\anjun\OneDrive\Desktop\EP\DIME\DIME_Data\Raw"
 global path3 "C:\Users\anjun\OneDrive\Desktop\EP\DIME\DIME_Data\Cleaned"
 
-import delimited "$path\contribs_cf_combined.csv", varnames(1) clear
+import delimited "$path\zip_contribs_combined.csv", varnames(1) clear
 
 gen date2 = date(date, "YMD")
 format date2 %td
@@ -24,9 +24,9 @@ gen week = wofd(date)
 
 order week, after(date)
 
-sort week fips
+sort week contributorzipcode
 
-export delimited "$path\contribs_cf_combined.csv", replace
+export delimited "$path\zip_contribs_combined.csv", replace
 
 
 
@@ -43,39 +43,47 @@ export delimited "$path\contribs_cf_combined.csv", replace
 
 
 clear all
-global path "C:\Users\anjun\OneDrive\Desktop\EP\DIME\DIME_Data\Output\County_Level\Weighted_Averages\CFScores"
+global path "C:\Users\anjun\OneDrive\Desktop\EP\DIME\DIME_Data\Output\ZIP_Level\Weighted_Averages"
 global path2 "C:\Users\anjun\OneDrive\Desktop\EP\DIME\DIME_Data\Raw"
 global path3 "C:\Users\anjun\OneDrive\Desktop\EP\DIME\DIME_Data\Cleaned"
 
-import delimited "$path\contribs_cf_combined.csv", varnames(1) clear
+import delimited "$path\zip_contribs_combined.csv", varnames(1) clear
 
 format week %tw
 
-save "$path\contribs_cf_combined"
+save "$path\zip_contribs_combined", replace
+
+****
+use "$path\zip_contribs_combined", replace
+
+keep contributorzipcode fips
+duplicates drop
+
+save "$path3\zip_to_fips", replace
+****
 
 * Now FEMA data to create the regressors.
-use "$path2\FEMA_disaster_county_clean", replace
+use "$path2\FEMA_disaster_county_clean_zips", replace
 
+drop fips
 * Remain in the relevant time frame
 keep if start_datetime > date("01/01/2000", "MDY") & start_datetime < date("01/01/2015", "MDY")
 
 ren (ymw fipscode) (week fips)
 destring fips, replace
 
-keep week fips
-duplicates drop fips week, force					// keep only one event per county in a week
-
-* This was here just to test, no need now.
-* keep if fips == 35053
+keep week contributorzipcode
+duplicates drop week contributorzipcode, force				
+* keep only one event per zip in a week
 
 gen EWE = 1											
 * dummy to signal one extreme weather event in a county in a week
 
 expand 9, gen(new)
-bysort fips week: gen n = _n
+bysort week contributorzipcode: gen n = _n
 
 replace EWE = 0 if n != 5
-bysort fips week: replace week = week + _n - 5
+bysort week contributorzipcode: replace week = week + _n - 5
 
 gen pre_1w = 0
 replace pre_1w = 1 if EWE == 0 & n == 4
@@ -95,63 +103,62 @@ replace post_3w = 1 if EWE == 0 & n == 8
 gen post_4w = 0
 replace post_4w = 1 if EWE == 0 & n == 9
 
-sort week fips
-quietly by week fips:  gen dup = cond(_N==1,0,_n)
+sort week contributorzipcode
+quietly by week contributorzipcode:  gen dup = cond(_N==1,0,_n)
 
 gen pre_dummy = max(pre_1w, pre_2w, pre_3w, pre_4w)
 gen post_dummy = max(EWE, post_1w, post_2w, post_3w, post_4w)
 
-bysort week fips: egen maxpre = max(pre_dummy)
-bysort week fips: egen maxpost = max(post_dummy)
-bysort week fips: gen both_pre_post = maxpre == maxpost
+bysort week contributorzipcode: egen maxpre = max(pre_dummy)
+bysort week contributorzipcode: egen maxpost = max(post_dummy)
+bysort week contributorzipcode: gen both_pre_post = maxpre == maxpost
 
 keep if both_pre_post == 1
 
-sort week fips
-by week fips: gen dup2 = cond(_N==1,0,_n)
+sort week contributorzipcode
+by week contributorzipcode: gen dup2 = cond(_N==1,0,_n)
 drop if dup2 > 1
 drop dup2 
 
 expand 4, gen(new2)
-bysort fips week: gen n2 = _n
-bysort fips week: replace week = week + n2
+bysort week contributorzipcode: gen n2 = _n
+bysort week contributorzipcode: replace week = week + n2
 
-sort week fips
-by week fips: gen dup3 = cond(_N==1,0,_n)
+sort week contributorzipcode
+by week contributorzipcode: gen dup3 = cond(_N==1,0,_n)
 drop if dup3 > 1
 drop dup3 
 
-keep week fips 
+keep week contributorzipcode 
 gen remove = 1
-save "$path3\remove_these", replace
+save "$path3\remove_these_zips", replace
 
 *************************************
 
-use "$path2\FEMA_disaster_county_clean", replace
+use "$path2\FEMA_disaster_county_clean_zips", replace
 
+drop fips
 * Remain in the relevant time frame
 keep if start_datetime > date("01/01/2000", "MDY") & start_datetime < date("01/01/2015", "MDY")
 
 ren (ymw fipscode) (week fips)
 destring fips, replace
 
-keep week fips
-duplicates drop fips week, force					// keep only one event per county in a week
-
-* This was here just to test, no need now.
-* keep if fips == 35053
+keep week contributorzipcode
+duplicates drop week contributorzipcode, force				
+* keep only one event per county in a week
 
 gen EWE = 1											
 * dummy to signal one extreme weather event in a county in a week
 
-merge 1:1 week fips using "$path3\remove_these"
+merge 1:1 week contributorzipcode using "$path3\remove_these_zips"
 keep if _merge == 1
 
 expand 9, gen(new)
-bysort fips week: gen n = _n
+bysort week contributorzipcode: gen n = _n
 
 replace EWE = 0 if n != 5
-bysort fips week: replace week = week + _n - 5
+bysort week contributorzipcode: replace week = week + _n - 5
 
 gen pre_1w = 0
 replace pre_1w = 1 if EWE == 0 & n == 4
@@ -176,15 +183,15 @@ drop remove n new _merge
 *tsfill, full
 
 * Final Merge.
-sort week fips
-merge 1:1 week fips using "$path\contribs_cf_combined"
+sort week contributorzipcode
+merge 1:1 week contributorzipcode using "$path\zip_contribs_combined"
 
 *tsset fips week
 *tsfill, full
 
 keep if _merge != 2
 
-save "$path\contribs_cf_combined_matched", replace
+save "$path\zip_contribs_combined_matched", replace
 
 
 
