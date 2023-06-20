@@ -31,6 +31,9 @@ relevant_columns <- c('cycle', 'bonica.cid', 'date', 'amount', 'contributor.zipc
 
 # Note down the cycles we want
 cycles <- c(2002, 2004, 2006, 2008, 2010, 2012, 2014)
+terciles <- fread(glue('{cleaned}/cf_scores_terciles.csv'))
+terc2 <- terciles$cutoff[1]
+terc1 <- terciles$cutoff[2]
 
 for(i in 1:length(cycles)) {
   
@@ -144,27 +147,30 @@ for(i in 1:length(cycles)) {
   # contribs$count[which(contribs$amount < 0)] <- -1
   
   contribs <- contribs[, `:=`(cfscore_avail = !(is.na(contributor.cfscore)),
-                              cfscore_pos = contributor.cfscore >= 0,
-                              cfscore_neg = contributor.cfscore < 0,
+                              cfscore_tercile1 = contributor.cfscore >= terc1,
+                              cfscore_tercile2 = contributor.cfscore >= terc2 & contributor.cfscore < terc1,
+                              cfscore_tercile3 = contributor.cfscore < terc2,
                               year = year(date))]
   
-  # First, collapse yearly cfscore averages.
-  contribs1 <- contribs[, .(sum_cfscore = sum(contributor.cfscore, na.rm = TRUE),
-                            num_dons = sum(cfscore_avail)),
-                        by = .(FIPS, year)]
-
-  # Saving the average CF Scores of donors in a FIPS in a given year.
-  fwrite(contribs1, glue('{cleaned}/county_avgcfscore_{cycles[i]}.csv'))
+  # # First, collapse yearly cfscore averages.
+  # contribs1 <- contribs[, .(sum_cfscore = sum(contributor.cfscore, na.rm = TRUE),
+  #                           num_dons = sum(cfscore_avail)),
+  #                       by = .(FIPS, year)]
+  # 
+  # # Saving the average CF Scores of donors in a FIPS in a given year.
+  # fwrite(contribs1, glue('{cleaned}/county_avgcfscore_{cycles[i]}.csv'))
   
   # Now collapse individual data to get data only on the county-date-recipient level.
-  contribs <- contribs[, .(TPD = sum(amount),
-                           Donation_Count = sum(count),
-                           TPD_cf = sum(amount * cfscore_avail),
-                           Donation_Count_cf = sum(count * cfscore_avail),
-                           TPD_cfpos = sum(amount * cfscore_pos),
-                           Donation_Count_cfpos = sum(count * cfscore_pos),
-                           TPD_cfneg = sum(amount * cfscore_neg),
-                           Donation_Count_cfneg = sum(count * cfscore_neg)),
+  contribs <- contribs[, .(TPD = sum(amount, na.rm = TRUE),
+                           Donation_Count = sum(count, na.rm = TRUE),
+                           TPD_cf = sum(amount * cfscore_avail, na.rm = TRUE),
+                           Donation_Count_cf = sum(count * cfscore_avail, na.rm = TRUE),
+                           TPD_cf1 = sum(amount * cfscore_tercile1, na.rm = TRUE),
+                           Donation_Count_cf1 = sum(count * cfscore_tercile1, na.rm = TRUE),
+                           TPD_cf2 = sum(amount * cfscore_tercile2, na.rm = TRUE),
+                           Donation_Count_cf2 = sum(count * cfscore_tercile2, na.rm = TRUE),
+                           TPD_cf3 = sum(amount * cfscore_tercile3, na.rm = TRUE),
+                           Donation_Count_cf3 = sum(count * cfscore_tercile3, na.rm = TRUE)),
                        by = .(FIPS, ICPSR2, date, recipient.type)]
   
   # Load in green PAC data.
@@ -208,23 +214,29 @@ for(i in 1:length(cycles)) {
                               Donation_count_cands = (Donation_Count * indicator_cand * indicator_has_LCV_data),
                               TPD_cands_cf = (TPD_cf * indicator_cand * indicator_has_LCV_data),
                               Donation_count_cands_cf = (Donation_Count_cf * indicator_cand * indicator_has_LCV_data),
-                              TPD_cands_cfpos = (TPD_cfpos * indicator_cand * indicator_has_LCV_data),
-                              Donation_count_cands_cfpos = (Donation_Count_cfpos * indicator_cand * indicator_has_LCV_data),
-                              TPD_cands_cfneg = (TPD_cfneg * indicator_cand * indicator_has_LCV_data),
-                              Donation_count_cands_cfneg = (Donation_Count_cfneg * indicator_cand * indicator_has_LCV_data))]
+                              TPD_cands_cf1 = (TPD_cf1 * indicator_cand * indicator_has_LCV_data),
+                              Donation_count_cands_cf1 = (Donation_Count_cf1 * indicator_cand * indicator_has_LCV_data),
+                              TPD_cands_cf2 = (TPD_cf2 * indicator_cand * indicator_has_LCV_data),
+                              Donation_count_cands_cf2 = (Donation_Count_cf2 * indicator_cand * indicator_has_LCV_data),
+                              TPD_cands_cf3 = (TPD_cf3 * indicator_cand * indicator_has_LCV_data),
+                              Donation_count_cands_cf3 = (Donation_Count_cf3 * indicator_cand * indicator_has_LCV_data))]
   
   contribs <- contribs[, `:=`(wsum_amounts_adj = (TPD_cands * Adj.Score),
                               wsum_amounts_nominal = (TPD_cands * Nominal.Score),
                               wsum_counts_adj = (Donation_count_cands * Adj.Score),
                               wsum_counts_nominal = (Donation_count_cands * Nominal.Score),
-                              wsum_amounts_adj_cfpos = (TPD_cands_cfpos * Adj.Score),
-                              wsum_amounts_nominal_cfpos = (TPD_cands_cfpos * Nominal.Score),
-                              wsum_counts_adj_cfpos = (Donation_count_cands_cfpos * Adj.Score),
-                              wsum_counts_nominal_cfpos = (Donation_count_cands_cfpos * Nominal.Score),
-                              wsum_amounts_adj_cfneg = (TPD_cands_cfneg * Adj.Score),
-                              wsum_amounts_nominal_cfneg = (TPD_cands_cfneg * Nominal.Score),
-                              wsum_counts_adj_cfneg = (Donation_count_cands_cfneg * Adj.Score),
-                              wsum_counts_nominal_cfneg = (Donation_count_cands_cfneg * Nominal.Score))]
+                              wsum_amounts_adj_cf1 = (TPD_cands_cf1 * Adj.Score),
+                              wsum_amounts_nominal_cf1 = (TPD_cands_cf1 * Nominal.Score),
+                              wsum_counts_adj_cf1 = (Donation_count_cands_cf1 * Adj.Score),
+                              wsum_counts_nominal_cf1 = (Donation_count_cands_cf1 * Nominal.Score),
+                              wsum_amounts_adj_cf2 = (TPD_cands_cf2 * Adj.Score),
+                              wsum_amounts_nominal_cf2 = (TPD_cands_cf2 * Nominal.Score),
+                              wsum_counts_adj_cf2 = (Donation_count_cands_cf2 * Adj.Score),
+                              wsum_counts_nominal_cf2 = (Donation_count_cands_cf2 * Nominal.Score),
+                              wsum_amounts_adj_cf3 = (TPD_cands_cf3 * Adj.Score),
+                              wsum_amounts_nominal_cf3 = (TPD_cands_cf3 * Nominal.Score),
+                              wsum_counts_adj_cf3 = (Donation_count_cands_cf3 * Adj.Score),
+                              wsum_counts_nominal_cf3 = (Donation_count_cands_cf3 * Nominal.Score))]
   
   # Remove unimportant columns now.
   contribs <- contribs[, c('prev_year',
@@ -233,10 +245,12 @@ for(i in 1:length(cycles)) {
                            'Donation_Count',
                            'TPD_cf',
                            'Donation_Count_cf',
-                           'TPD_cfpos',
-                           'Donation_Count_cfpos',
-                           'TPD_cfneg',
-                           'Donation_Count_cfneg',
+                           'TPD_cf1',
+                           'Donation_Count_cf1',
+                           'TPD_cf2',
+                           'Donation_Count_cf2',
+                           'TPD_cf3',
+                           'Donation_Count_cf3',
                            'indicator_cand',
                            'indicator_PAC',
                            'indicator_greenPAC',
@@ -292,22 +306,28 @@ full_df <- full_df[, .(tpd_cands = sum(tpd_cands, na.rm = TRUE),
                        donation_count_cands = sum(donation_count_cands, na.rm = TRUE),
                        tpd_cands_cf = sum(tpd_cands_cf, na.rm = TRUE),
                        donation_count_cands_cf = sum(donation_count_cands_cf, na.rm = TRUE),
-                       tpd_cands_cfpos = sum(tpd_cands_cfpos, na.rm = TRUE),
-                       donation_count_cands_cfpos = sum(donation_count_cands_cfpos, na.rm = TRUE),
-                       tpd_cands_cfneg = sum(tpd_cands_cfneg, na.rm = TRUE),
-                       donation_count_cands_cfneg = sum(donation_count_cands_cfneg, na.rm = TRUE),
+                       tpd_cands_cf1 = sum(tpd_cands_cf1, na.rm = TRUE),
+                       donation_count_cands_cf1 = sum(donation_count_cands_cf1, na.rm = TRUE),
+                       tpd_cands_cf2 = sum(tpd_cands_cf2, na.rm = TRUE),
+                       donation_count_cands_cf2 = sum(donation_count_cands_cf2, na.rm = TRUE),
+                       tpd_cands_cf3 = sum(tpd_cands_cf3, na.rm = TRUE),
+                       donation_count_cands_cf3 = sum(donation_count_cands_cf3, na.rm = TRUE),
                        wsum_amounts_adj = sum(wsum_amounts_adj, na.rm = TRUE),
                        wsum_amounts_nominal = sum(wsum_amounts_nominal, na.rm = TRUE),
                        wsum_counts_adj = sum(wsum_counts_adj, na.rm = TRUE),
                        wsum_counts_nominal = sum(wsum_counts_nominal, na.rm = TRUE),
-                       wsum_amounts_adj_cfpos = sum(wsum_amounts_adj_cfpos, na.rm = TRUE),
-                       wsum_amounts_nominal_cfpos = sum(wsum_amounts_nominal_cfpos, na.rm = TRUE),
-                       wsum_counts_adj_cfpos = sum(wsum_counts_adj_cfpos, na.rm = TRUE),
-                       wsum_counts_nominal_cfpos = sum(wsum_counts_nominal_cfpos, na.rm = TRUE),
-                       wsum_amounts_adj_cfneg = sum(wsum_amounts_adj_cfneg, na.rm = TRUE),
-                       wsum_amounts_nominal_cfneg = sum(wsum_amounts_nominal_cfneg, na.rm = TRUE),
-                       wsum_counts_adj_cfneg = sum(wsum_counts_adj_cfneg, na.rm = TRUE),
-                       wsum_counts_nominal_cfneg = sum(wsum_counts_nominal_cfneg, na.rm = TRUE)),
+                       wsum_amounts_adj_cf1 = sum(wsum_amounts_adj_cf1, na.rm = TRUE),
+                       wsum_amounts_nominal_cf1 = sum(wsum_amounts_nominal_cf1, na.rm = TRUE),
+                       wsum_counts_adj_cf1 = sum(wsum_counts_adj_cf1, na.rm = TRUE),
+                       wsum_counts_nominal_cf1 = sum(wsum_counts_nominal_cf1, na.rm = TRUE),
+                       wsum_amounts_adj_cf2 = sum(wsum_amounts_adj_cf2, na.rm = TRUE),
+                       wsum_amounts_nominal_cf2 = sum(wsum_amounts_nominal_cf2, na.rm = TRUE),
+                       wsum_counts_adj_cf2 = sum(wsum_counts_adj_cf2, na.rm = TRUE),
+                       wsum_counts_nominal_cf2 = sum(wsum_counts_nominal_cf2, na.rm = TRUE),
+                       wsum_amounts_adj_cf3 = sum(wsum_amounts_adj_cf3, na.rm = TRUE),
+                       wsum_amounts_nominal_cf3 = sum(wsum_amounts_nominal_cf3, na.rm = TRUE),
+                       wsum_counts_adj_cf3 = sum(wsum_counts_adj_cf3, na.rm = TRUE),
+                       wsum_counts_nominal_cf3 = sum(wsum_counts_nominal_cf3, na.rm = TRUE)),
                    by = .(fips, week)]
 
 fwrite(full_df, glue('{output}/contribs_cf_combined.csv'))
@@ -324,20 +344,67 @@ fw2 <- unique(fw)
 #########
 #########
 #########
+
 # #### NEXT STEP : AVG CFSCORES DATA.
-list_of_datasets_by_year <- list.files(path = glue('{cleaned}/'), pattern = 'county_avgcfscore_20*')
+# list_of_datasets_by_year <- list.files(path = glue('{cleaned}/'), pattern = 'county_avgcfscore_20*')
+# 
+# list_of_datasets_by_year
+# 
+# full_list <- list()
+# for(i in 1:length(list_of_datasets_by_year)) {
+# 
+#   contribs <- fread(glue('{cleaned}/{list_of_datasets_by_year[i]}'))
+#   full_list[[i]] <- contribs
+# 
+# }
+# 
+# full_df <- bind_rows(full_list)
+# 
+# # Write it as csv. Done.
+# fwrite(full_df, glue('{output}/county_avgcfscore_combined.csv'))
 
-list_of_datasets_by_year
-
-full_list <- list()
-for(i in 1:length(list_of_datasets_by_year)) {
-
-  contribs <- fread(glue('{cleaned}/{list_of_datasets_by_year[i]}'))
-  full_list[[i]] <- contribs
-
-}
-
-full_df <- bind_rows(full_list)
-
-# Write it as csv. Done.
-fwrite(full_df, glue('{output}/county_avgcfscore_combined.csv'))
+# CFScore terciles calculate
+# relevant_columns <- c('contributor.cfscore')
+# 
+# for(i in 1:length(cycles)) {
+#   
+#   print(glue('We are on {cycles[i]}'))
+#   
+#   if(i < 6) {
+#     # Now load it in.
+#     contribs <- fread(glue('{localfiles}/contribDB_{cycles[i]}.csv'), select = relevant_columns)
+#     
+#   } else contribs <- fread(glue('{harddrive}/contribDB_{cycles[i]}.csv'), select = relevant_columns)
+#   
+#   cf <- contribs[!is.na(contributor.cfscore),]
+#   
+#   fwrite(contribs, glue('{cleaned}/cf_scores_{cycles[i]}.csv'))
+#   
+#   rm(contribs)
+#   
+# }
+# 
+# list_of_datasets_by_year <- list.files(path = glue('{cleaned}/'), pattern = 'cf_scores_20*')
+# 
+# list_of_datasets_by_year
+# 
+# full_list <- list()
+# for(i in 1:length(list_of_datasets_by_year)) {
+#   
+#   contribs <- fread(glue('{cleaned}/{list_of_datasets_by_year[i]}'))
+#   full_list[[i]] <- contribs
+#   
+# }
+# 
+# full_df <- bind_rows(full_list)
+# 
+# cfscores <- full_df$contributor.cfscore
+# 
+# vec <- c()
+# vec[1] <- quantile(cfscores, 0.33, na.rm = TRUE)
+# vec[2] <- quantile(cfscores, 0.66, na.rm = TRUE)
+# 
+# df <- data.frame('tercile' = c(2,3), 'cutoff' = vec)
+# 
+# # Write it as csv. Done.
+# fwrite(df, glue('{cleaned}/cf_scores_terciles.csv'))

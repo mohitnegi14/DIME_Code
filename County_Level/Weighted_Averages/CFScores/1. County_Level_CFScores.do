@@ -51,7 +51,7 @@ import delimited "$path\contribs_cf_combined.csv", varnames(1) clear
 
 format week %tw
 
-save "$path\contribs_cf_combined"
+save "$path\contribs_cf_combined", replace
 
 * Now FEMA data to create the regressors.
 use "$path2\FEMA_disaster_county_clean", replace
