@@ -1,6 +1,6 @@
 ################## 
 # MOHIT NEGI
-# Last Updated : 16 June 2023
+# Last Updated : 23 June 2023
 # Contact on : mohit.negi@studbocconi.it
 ################## 
 
@@ -9,7 +9,7 @@ harddrive <- 'D:/Mohit_Work/DIME/ContribDB'
 localfiles <- 'C:/Users/anjun/OneDrive/Desktop/EP/DIME/ContribDB'
 raw <- 'C:/Users/anjun/OneDrive/Desktop/EP/DIME/DIME_Data/Raw'
 cleaned <- 'C:/Users/anjun/OneDrive/Desktop/EP/DIME/DIME_Data/Cleaned'
-output <- 'C:/Users/anjun/OneDrive/Desktop/EP/DIME/DIME_Data/Output/ZIP_Level/Weighted_Averages'
+output <- 'C:/Users/anjun/OneDrive/Desktop/EP/DIME/DIME_Data/Output/ZIP_Level/Quantiles2'
 ##################
 
 ################## LIBRARIES
@@ -28,7 +28,7 @@ relevant_columns <- c('cycle', 'bonica.cid', 'date', 'amount', 'contributor.zipc
 # Note down the cycles we want
 cycles <- c(1998, 2000, 2002, 2004, 2006, 2008, 2010, 2012, 2014)
 
-for(i in 1:length(cycles)) {
+for(i in 3:length(cycles)) {
   
   print(glue('We are on {cycles[i]}'))
   
@@ -146,14 +146,14 @@ for(i in 1:length(cycles)) {
                               below200_amount = (below200 * amount))]
   
   # Now collapse individual data to get data only on the zip-date-recipient level.
-  contribs <- contribs[, .(TPD = sum(amount, na.rm = TRUE, na.rm = TRUE), 
+  contribs <- contribs[, .(TPD = sum(amount, na.rm = TRUE), 
                            Donation_count = sum(count, na.rm = TRUE), 
                            TPD_above200 = sum(above200_amount, na.rm = TRUE),
                            TPD_below200 = sum(below200_amount, na.rm = TRUE),
                            Donation_count_above200 = sum(above200, na.rm = TRUE),
                            Donation_count_below200 = sum(below200, na.rm = TRUE),
-                           FIPS = first(FIPS, na.rm = TRUE),
-                           Party = first(recipient.party), na.rm = TRUE),
+                           FIPS = first(FIPS),
+                           Party = first(recipient.party)),
                        by = .(contributor.zipcode, ICPSR2, date, recipient.type)]
   
   # Load in green PAC data.
@@ -163,19 +163,26 @@ for(i in 1:length(cycles)) {
   green_PACs <- green_PACs[which(green_PACs != '')] %>% unique()
   green_PACs <- data.table('ICPSR' = green_PACs)
   
-  contribs1 <- contribs[, .(contributor.zipcode, ICPSR2, date, TPD, Donation_count, Party)]
-  fwrite(contribs1, glue('{cleaned}/zip_partisanship_{cycles[i]}.csv'))
-  
   # Create indicators for whether the recipient was a candidate or a PAC.
   contribs <- contribs[, `:=`(indicator_cand = (recipient.type == 'cand'),
                               indicator_PAC = (recipient.type == 'comm'))]
   
   # Create indicator if the recipient is a green PAC.
-  contribs <- contribs[, indicator_greenPAC := ((contribs$ICPSR2 %in% unique(green_PACs$ICPSR)) * indicator_PAC)]
+  contribs <- contribs[, indicator_greenPAC := ((ICPSR2 %in% unique(green_PACs$ICPSR)) * indicator_PAC)]
   
   # Now load in LCV scorecard data.
   LCV_scores <- fread(glue('{cleaned}/harmonized_scorecards.csv'))
   LCV_scores$ICPSR <- as.character(LCV_scores$ICPSR)
+  
+  LCV_scores <- LCV_scores %>%
+    group_by(Year) %>%
+    mutate('top25perc_val' = quantile(Nominal.Score, 0.75),
+           'top50perc_val' = quantile(Nominal.Score, 0.5),
+           'bottom25perc_val' = quantile(Nominal.Score, 0.25)) %>%
+    mutate('top50perc_ind' = (Nominal.Score < top25perc_val & Nominal.Score >= top50perc_val),
+           'bottom50perc_ind' = (Nominal.Score >= bottom25perc_val & Nominal.Score < top50perc_val)) %>%
+    ungroup() %>%
+    as.data.table()
   
   # Ed Markey - middle of 2013 rep to sen anomaly, appears twice. Remove his senate record. (14435)
   # Steven Kirk - Nov 2010 transition (20115)
@@ -186,6 +193,10 @@ for(i in 1:length(cycles)) {
   
   LCV_indicator_dset <- LCV_scores[,.(ICPSR, Year, Nominal.Score, Adj.Score, indicator_has_LCV_data = 1)]
   
+  # Create new datasets that keep only the greenest candidates
+  top50perc_cands <- LCV_scores[top50perc_ind == TRUE, .(ICPSR, Year, indicator_top_50perc = 1)]
+  bottom50perc_cands <- LCV_scores[bottom50perc_ind == TRUE, .(ICPSR, Year, indicator_bottom_50perc = 1)]
+  
   # # We want the scores from the year before.
   contribs <- contribs[, prev_year := (year(date) - 1)]
   
@@ -195,26 +206,38 @@ for(i in 1:length(cycles)) {
                                by.y = c('ICPSR', 'Year'),
                                all.x = TRUE)
   
-  #### Make the final columns for analysis. We will only consider donations to LCV data candidates now.
-  contribs <- contribs[, `:=`(TPD_cands = (TPD * indicator_cand * indicator_has_LCV_data),
-                              Donation_count_cands = (Donation_count * indicator_cand * indicator_has_LCV_data),
-                              TPD_cands_above200 = (TPD_above200 * indicator_cand * indicator_has_LCV_data),
-                              TPD_cands_below200 = (TPD_below200 * indicator_cand * indicator_has_LCV_data),
-                              Donation_count_cands_above200 = (Donation_count_above200 * indicator_cand * indicator_has_LCV_data),
-                              Donation_count_cands_below200 = (Donation_count_below200 * indicator_cand * indicator_has_LCV_data))]
+  contribs <- merge.data.table(contribs, top50perc_cands,
+                               by.x = c('ICPSR2', 'prev_year'),
+                               by.y = c('ICPSR', 'Year'),
+                               all.x = TRUE)
+  contribs <- merge.data.table(contribs, bottom50perc_cands,
+                               by.x = c('ICPSR2', 'prev_year'),
+                               by.y = c('ICPSR', 'Year'),
+                               all.x = TRUE)
   
-  contribs <- contribs[, `:=`(wsum_amounts_adj = (TPD_cands * Adj.Score),
-                              wsum_amounts_nominal = (TPD_cands * Nominal.Score),
-                              wsum_counts_adj = (Donation_count_cands * Adj.Score),
-                              wsum_counts_nominal = (Donation_count_cands * Nominal.Score),
-                              wsum_amounts_adj_above200 = (TPD_cands_above200 * Adj.Score),
-                              wsum_amounts_nominal_above200 = (TPD_cands_above200 * Nominal.Score),
-                              wsum_counts_adj_above200 = (Donation_count_cands_above200 * Adj.Score),
-                              wsum_counts_nominal_above200 = (Donation_count_cands_above200 * Nominal.Score),
-                              wsum_amounts_adj_below200 = (TPD_cands_below200 * Adj.Score),
-                              wsum_amounts_nominal_below200 = (TPD_cands_below200 * Nominal.Score),
-                              wsum_counts_adj_below200 = (Donation_count_cands_below200 * Adj.Score),
-                              wsum_counts_nominal_below200 = (Donation_count_cands_below200 * Nominal.Score))]
+  #### Make the final columns for analysis. We will only consider donations to LCV data candidates now
+  #### for the quantiles but all donations for the green PACs.
+  contribs <- contribs[, `:=`(TPD_cands = (TPD * indicator_cand * indicator_has_LCV_data),
+                              TPD_PACs = (TPD * indicator_PAC),
+                              ###### BIG & SMALL AMOUNTS
+                              TPD_top_50perc = (TPD * indicator_cand * indicator_top_50perc),
+                              TPD_bottom_50perc = (TPD * indicator_cand * indicator_bottom_50perc),
+                              ###### BIG & SMALL COUNTS
+                              Donation_count_top_50perc = (Donation_count * indicator_cand  * indicator_top_50perc),
+                              Donation_count_bottom_50perc = (Donation_count * indicator_cand * indicator_bottom_50perc),
+                              ###### SMALL AMOUNTS
+                              TPD_top_50perc_below200 = (TPD_below200 * indicator_cand * indicator_top_50perc),
+                              TPD_bottom_50perc_below200 = (TPD_below200 * indicator_cand * indicator_bottom_50perc),
+                              ###### SMALL COUNTS
+                              Donation_count_top_50perc_below200 = (Donation_count_below200 * indicator_cand * indicator_top_50perc),
+                              Donation_count_bottom_50perc_below200 = (Donation_count_below200 * indicator_cand * indicator_bottom_50perc),
+                              ###### BIG AMOUNTS
+                              TPD_top_50perc_above200 = (TPD_above200 * indicator_cand * indicator_top_50perc),
+                              TPD_bottom_50perc_above200 = (TPD_above200 * indicator_cand * indicator_bottom_50perc),
+                              ###### BIG COUNTS
+                              Donation_count_top_50perc_above200 = (Donation_count_above200 * indicator_cand * indicator_top_50perc),
+                              Donation_count_bottom_50perc_above200 = (Donation_count_above200 * indicator_cand * indicator_bottom_50perc)
+                              )]
   
   # Remove unimportant columns now.
   contribs <- contribs[, c('prev_year',
@@ -230,24 +253,32 @@ for(i in 1:length(cycles)) {
                            'indicator_greenPAC',
                            'Nominal.Score',
                            'Adj.Score',
-                           'indicator_has_LCV_data') := NULL]
+                           'indicator_has_LCV_data',
+                           'indicator_top_50perc',
+                           'indicator_bottom_50perc') := NULL]
   
   # Since we are, for now, only considering donations to candidates, many NAs (when the donation was to a PAC),
   # So remove them.
-  contribs <- contribs[!is.na(TPD_cands),]
+  contribs <- contribs[!(is.na(TPD_cands) & (is.na(TPD_PACs) | TPD_PACs == 0)),]
   
-  fwrite(contribs, glue('{cleaned}/zip_contribs_{cycles[i]}.csv'))
+  # Replace NAs with 0.
+  f_dowle3 = function(DT) {
+  for (j in names(DT)) {
+    set(DT,which(is.na(DT[[j]])),j,0)
+    }
+  }
+  
+  # Now it will change them.
+  f_dowle3(contribs)
+  
+  fwrite(contribs, glue('{cleaned}/zipquantiles2_contribs_{cycles[i]}.csv'))
   
   rm(contribs)
   
 }
 
 #### NEXT STEP : COMBINE THESE DATA INTO ONE.
-list_of_datasets_by_year <- list.files(path = glue('{cleaned}/'), pattern = 'zip_contribs_20*')
-
-list_of_datasets_by_year
-
-list_of_datasets_by_year <- list_of_datasets_by_year[12:18]
+list_of_datasets_by_year <- list.files(path = glue('{cleaned}/'), pattern = 'zipquantiles2_contribs_20*')
 
 list_of_datasets_by_year
 
@@ -256,6 +287,9 @@ for(i in 1:length(list_of_datasets_by_year)) {
 
   contribs <- fread(glue('{cleaned}/{list_of_datasets_by_year[i]}'))
   contribs <- contribs[, Party := as.character(Party)]
+  contribs <- contribs[, c('TPD_PACs',
+                           'TPD_cands'
+                           ) := NULL]
   full_list[[i]] <- contribs
 
 }
@@ -275,24 +309,24 @@ fwrite(full_df, glue('{output}/zip_contribs_combined.csv'))
 full_df <- fread(glue('{output}/zip_contribs_combined.csv'))
 
 # Now collapse to county-week level, our final unit.
-full_df <- full_df[, .(tpd_cands = sum(tpd_cands, na.rm = TRUE),
-                       donation_count_cands = sum(donation_count_cands, na.rm = TRUE),
-                       tpd_cands_above200 = sum(tpd_cands_above200, na.rm = TRUE),
-                       donation_count_cands_above200 = sum(donation_count_cands_above200, na.rm = TRUE),
-                       tpd_cands_below200 = sum(tpd_cands_below200, na.rm = TRUE),
-                       donation_count_cands_below200 = sum(donation_count_cands_below200, na.rm = TRUE),
-                       wsum_amounts_adj = sum(wsum_amounts_adj, na.rm = TRUE),
-                       wsum_amounts_nominal = sum(wsum_amounts_nominal, na.rm = TRUE),
-                       wsum_counts_adj = sum(wsum_counts_adj, na.rm = TRUE),
-                       wsum_counts_nominal = sum(wsum_counts_nominal, na.rm = TRUE),
-                       wsum_amounts_adj_above200 = sum(wsum_amounts_adj_above200, na.rm = TRUE),
-                       wsum_amounts_nominal_above200 = sum(wsum_amounts_nominal_above200, na.rm = TRUE),
-                       wsum_counts_adj_above200 = sum(wsum_counts_adj_above200, na.rm = TRUE),
-                       wsum_counts_nominal_above200 = sum(wsum_counts_nominal_above200, na.rm = TRUE),
-                       wsum_amounts_adj_below200 = sum(wsum_amounts_adj_below200, na.rm = TRUE),
-                       wsum_amounts_nominal_below200 = sum(wsum_amounts_nominal_below200, na.rm = TRUE),
-                       wsum_counts_adj_below200 = sum(wsum_counts_adj_below200, na.rm = TRUE),
-                       wsum_counts_nominal_below200 = sum(wsum_counts_nominal_below200, na.rm = TRUE),
+full_df <- full_df[, .(###### BIG & SMALL AMOUNTS
+                       tpd_top_50perc = sum(tpd_top_50perc, na.rm = TRUE),
+                       tpd_bottom_50perc = sum(tpd_bottom_50perc, na.rm = TRUE),
+                       ###### BIG & SMALL COUNTS
+                       donation_count_top_50perc = sum(donation_count_top_50perc, na.rm = TRUE),
+                       donation_count_bottom_50perc = sum(donation_count_bottom_50perc, na.rm = TRUE),
+                       ###### SMALL AMOUNTS
+                       tpd_top_50perc_below200 = sum(tpd_top_50perc_below200, na.rm = TRUE),
+                       tpd_bottom_50perc_below200 = sum(tpd_bottom_50perc_below200, na.rm = TRUE),
+                       ###### SMALL COUNTS
+                       donation_count_top_50perc_below2 = sum(donation_count_top_50perc_below2, na.rm = TRUE),
+                       donation_count_bottom_50perc_bel = sum(donation_count_bottom_50perc_bel, na.rm = TRUE),
+                       ###### BIG AMOUNTS
+                       tpd_top_50perc_above200 = sum(tpd_top_50perc_above200, na.rm = TRUE),
+                       tpd_bottom_50perc_above200 = sum(tpd_bottom_50perc_above200, na.rm = TRUE),
+                       ###### BIG COUNTS
+                       donation_count_top_50perc_above2 = sum(donation_count_top_50perc_above2, na.rm = TRUE),
+                       donation_count_bottom_50perc_abo = sum(donation_count_bottom_50perc_abo, na.rm = TRUE),
                        fips = first(fips)),
                    by = .(contributorzipcode, week)]
 
@@ -303,65 +337,4 @@ fw2 <- unique(fw)
 
 fwrite(full_df, glue('{output}/zip_contribs_combined.csv'))
 
-# #########
-# library(haven)
-# FEMA_data <- read_dta(glue('{raw}/FEMA_disaster_county_clean.dta'))
-# zip_to_fips <- read_dta(glue('{cleaned}/zip_to_fips.dta'))
-# zip_to_fips$fipscode <- as.character(zip_to_fips$fips)
-# 
-# library(tidyverse)
-# df <- left_join(FEMA_data,
-#                 zip_to_fips,
-#                 by = 'fipscode')
-# 
-# write_dta(df, glue('{raw}/FEMA_disaster_county_clean_zips.dta'))
-# #########
-
 # NOW TAKE THIS BACK TO STATA, and get final output.
-
-#### NEXT STEP : ZIP PARTISANSHIP
-list_of_datasets_by_year <- list.files(path = glue('{cleaned}/'), pattern = 'zip_partisanship_*')
-
-list_of_datasets_by_year
-
-full_list <- list()
-for(i in 1:length(list_of_datasets_by_year)) {
-  
-  contribs <- fread(glue('{cleaned}/{list_of_datasets_by_year[i]}'))
-  contribs <- contribs[, Party := as.character(Party)]
-  full_list[[i]] <- contribs
-  
-}
-
-full_df <- bind_rows(full_list)
-
-# 100 = DEM, 200 = REP
-full_df <- full_df[Party %in% c('100', '200'), ][,`:=`(democrat_amount = (TPD * (Party == '100')),
-                          republican_amount = (TPD * (Party == '200')),
-                          democrat_count = (Donation_count * (Party == '100')),
-                          republican_count = (Donation_count * (Party == '200')),
-                          month = floor_date(date, unit = 'month'))]
-
-full_df <- full_df[, .(democrat_amount = sum(democrat_amount),
-             republican_amount = sum(republican_amount),
-             democrat_count = sum(democrat_count),
-             republican_count = sum(republican_count)),
-         by = .(contributor.zipcode, month)]
-
-# Write it as csv. Done.
-fwrite(full_df, glue('{cleaned}/zip_partisanship_combined.csv'))
-
-# WAS WRONG COLLAPSE THE ROOT CAUSE??
-# df <- fread('D:/Mohit_Work/DIME/Cleaned/zip_contribs_2002.csv')
-# 
-# df <- df[,1:23]
-# df <- df[!is.na(TPD_LCV_comparable),]
-# 
-# 
-# bbb <- contribs
-# ccc <- contribs # with first in collapse.
-# 
-# b <- bbb[, 1:4]
-# c <- ccc[, 1:4]
-# 
-# kkk <- dplyr::setdiff(b, c)
